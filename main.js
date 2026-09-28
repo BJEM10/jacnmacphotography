@@ -15,6 +15,81 @@
   var reduced = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
   function safe(fn, name) { try { fn(); } catch (e) { if (window.console) console.warn("[" + name + "]", e); } }
 
+  /* Language (EN base, ES from i18n.js) ------------------------------ */
+  var LANG_KEY = "jacmac-lang";
+  var ES = (window.__I18N__ || {}).es || null;
+  var lang = "en";
+  function tr(s) { return lang === "es" && ES && ES.attr[s] ? ES.attr[s] : s; }
+
+  function initLanguage() {
+    var btn = $("[data-lang-toggle]");
+    if (!btn || !ES) { if (btn) btn.hidden = true; return; }
+    var ATTRS = ["alt", "aria-label", "data-caption", "title"];
+    var SKIP = "script, style, noscript, .calendly-inline-widget";
+    var metaDesc = $('meta[name="description"]');
+    var original = { title: document.title, desc: metaDesc ? metaDesc.content : "" };
+    var changedText = [], changedAttr = [], changedHtml = [];
+    var norm = function (s) { return s.replace(/\s+/g, " ").trim(); };
+
+    function toSpanish() {
+      Object.keys(ES.html || {}).forEach(function (sel) {
+        var el = $(sel);
+        if (!el || el.__en !== undefined) return;
+        el.__en = el.innerHTML; el.innerHTML = ES.html[sel]; changedHtml.push(el);
+      });
+      var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+        acceptNode: function (n) { return n.parentElement && !n.parentElement.closest(SKIP) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT; }
+      });
+      var node;
+      while ((node = walker.nextNode())) {
+        var key = norm(node.nodeValue);
+        if (!key || node.__en !== undefined || ES.text[key] === undefined) continue;
+        var lead = node.nodeValue.match(/^\s*/)[0], trail = node.nodeValue.match(/\s*$/)[0];
+        node.__en = node.nodeValue;
+        node.nodeValue = lead + ES.text[key] + trail;
+        changedText.push(node);
+      }
+      $$("[" + ATTRS.join("],[") + "]").forEach(function (el) {
+        if (el.closest(SKIP)) return;
+        ATTRS.forEach(function (a) {
+          var v = el.getAttribute(a);
+          if (v && ES.attr[v]) {
+            el.__enAttr = el.__enAttr || {};
+            if (el.__enAttr[a] === undefined) { el.__enAttr[a] = v; changedAttr.push([el, a]); }
+            el.setAttribute(a, ES.attr[v]);
+          }
+        });
+      });
+      if (ES.title) document.title = ES.title;
+      if (metaDesc && ES.description) metaDesc.content = ES.description;
+    }
+
+    function toEnglish() {
+      changedHtml.forEach(function (el) { el.innerHTML = el.__en; delete el.__en; });
+      changedText.forEach(function (n) { n.nodeValue = n.__en; delete n.__en; });
+      changedAttr.forEach(function (p) { p[0].setAttribute(p[1], p[0].__enAttr[p[1]]); delete p[0].__enAttr[p[1]]; });
+      changedHtml = []; changedText = []; changedAttr = [];
+      document.title = original.title;
+      if (metaDesc) metaDesc.content = original.desc;
+    }
+
+    function apply(next, remember) {
+      if (next === lang) return;
+      lang = next;
+      if (lang === "es") toSpanish(); else toEnglish();
+      document.documentElement.lang = lang;
+      document.documentElement.classList.toggle("lang-es", lang === "es");
+      btn.setAttribute("aria-checked", String(lang === "es"));
+      btn.setAttribute("aria-label", lang === "es" ? "View in English / Ver en inglés" : "Ver en español / View in Spanish");
+      if (remember) { try { localStorage.setItem(LANG_KEY, lang); } catch (_) {} }
+    }
+
+    btn.addEventListener("click", function () { apply(lang === "es" ? "en" : "es", true); });
+    var saved = null;
+    try { saved = localStorage.getItem(LANG_KEY); } catch (_) {}
+    if (saved === "es") apply("es", false);
+  }
+
   /* Header: solid + compact after scrolling ------------------------ */
   function initHeader() {
     var h = $(".site-header");
@@ -39,7 +114,7 @@
     if (!btn || !menu) return;
     function set(open) {
       btn.setAttribute("aria-expanded", String(open));
-      btn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+      btn.setAttribute("aria-label", tr(open ? "Close menu" : "Open menu"));
       menu.classList.toggle("is-open", open);
       menu.setAttribute("aria-hidden", String(!open));
       document.body.classList.toggle("menu-open", open);
@@ -201,17 +276,45 @@
       '<button class="lb-btn lb-next" type="button" aria-label="Next photo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button></div>' +
       '<p class="lb-cap"></p>';
     document.body.appendChild(dlg);
-    var img = $("img", dlg), cap = $(".lb-cap", dlg), count = $(".lb-count", dlg);
-    var items = [], idx = 0;
-    function show(i) {
+    var img = $("img", dlg), stage = $(".lb-stage", dlg), cap = $(".lb-cap", dlg), count = $(".lb-count", dlg);
+    var items = [], idx = 0, token = 0, loaded = {};
+
+    // Pick the right file for the screen from the thumbnail's own srcset (not always the 1920px file).
+    function source(i) {
+      var a = items[i], t = $("img", a);
+      var ratio = t && t.width && t.height ? t.width / t.height : 1.5;
+      var fit = Math.min(window.innerWidth, Math.max(320, (window.innerHeight - 150) * ratio));
+      return { src: a.getAttribute("href"), srcset: t ? t.getAttribute("srcset") || "" : "", sizes: Math.round(fit) + "px", alt: t ? t.alt : "" };
+    }
+    // Decode off-screen so the swap is instant (cached per index).
+    function load(i) {
+      i = (i + items.length) % items.length;
+      if (loaded[i]) return loaded[i];
+      var s = source(i), pre = new Image();
+      pre.sizes = s.sizes; pre.srcset = s.srcset; pre.src = s.src;
+      loaded[i] = new Promise(function (resolve) {
+        var done = function () { resolve(s); };
+        if (pre.decode) pre.decode().then(done, done); else { pre.onload = pre.onerror = done; }
+        setTimeout(done, 4000); // never wait forever on a slow network
+      });
+      return loaded[i];
+    }
+    function show(i, dir) {
       idx = (i + items.length) % items.length;
-      var a = items[idx], thumb = $("img", a);
-      img.src = a.getAttribute("href");
-      img.alt = thumb ? thumb.alt : "";
-      cap.textContent = thumb ? thumb.alt : "";
+      var mine = ++token;
       count.textContent = (idx + 1) + " / " + items.length;
-      // re-trigger the fade
-      img.style.animation = "none"; void img.offsetWidth; img.style.animation = "";
+      stage.classList.add("is-loading");
+      load(idx).then(function (s) {
+        if (mine !== token) return; // a newer navigation won
+        img.sizes = s.sizes; img.srcset = s.srcset; img.src = s.src; img.alt = s.alt;
+        cap.textContent = s.alt;
+        img.style.transition = ""; img.style.transform = "";
+        img.classList.remove("lb-in-next", "lb-in-prev", "lb-in");
+        void img.offsetWidth;
+        img.classList.add(dir > 0 ? "lb-in-next" : dir < 0 ? "lb-in-prev" : "lb-in");
+        stage.classList.remove("is-loading");
+        load(idx + 1); load(idx - 1); load(idx + 2); // warm the neighbours
+      });
     }
     groups.forEach(function (g) {
       var links = $$("a", g);
@@ -219,29 +322,45 @@
         a.addEventListener("click", function (e) {
           if (typeof dlg.showModal !== "function") return; // old browser: open the file
           e.preventDefault();
-          items = links; show(i);
+          if (items !== links) { items = links; loaded = {}; }
+          img.removeAttribute("src"); img.removeAttribute("srcset");
+          show(i, 0);
           dlg.showModal();
           document.body.classList.add("menu-open");
         });
       });
     });
     $(".lb-close", dlg).addEventListener("click", function () { dlg.close(); });
-    $(".lb-prev", dlg).addEventListener("click", function () { show(idx - 1); });
-    $(".lb-next", dlg).addEventListener("click", function () { show(idx + 1); });
+    $(".lb-prev", dlg).addEventListener("click", function () { show(idx - 1, -1); });
+    $(".lb-next", dlg).addEventListener("click", function () { show(idx + 1, 1); });
     dlg.addEventListener("close", function () { document.body.classList.remove("menu-open"); });
-    dlg.addEventListener("click", function (e) { if (e.target === dlg || e.target.classList.contains("lb-stage")) dlg.close(); });
+    dlg.addEventListener("click", function (e) { if (e.target === dlg || e.target === stage) dlg.close(); });
     dlg.addEventListener("keydown", function (e) {
-      if (e.key === "ArrowRight") show(idx + 1);
-      if (e.key === "ArrowLeft") show(idx - 1);
+      if (e.key === "ArrowRight") show(idx + 1, 1);
+      if (e.key === "ArrowLeft") show(idx - 1, -1);
     });
-    // swipe on touch
-    var sx = null;
-    dlg.addEventListener("touchstart", function (e) { sx = e.touches[0].clientX; }, { passive: true });
-    dlg.addEventListener("touchend", function (e) {
+    // Swipe: the photo follows the finger, then slides to the next one or snaps back.
+    var sx = null, sy = null, dx = 0;
+    stage.addEventListener("touchstart", function (e) {
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY; dx = 0;
+      img.style.transition = "none";
+    }, { passive: true });
+    stage.addEventListener("touchmove", function (e) {
       if (sx === null) return;
-      var dx = e.changedTouches[0].clientX - sx;
-      if (Math.abs(dx) > 50) show(idx + (dx < 0 ? 1 : -1));
+      dx = e.touches[0].clientX - sx;
+      if (Math.abs(dx) > Math.abs(e.touches[0].clientY - sy)) img.style.transform = "translate3d(" + dx + "px,0,0)";
+    }, { passive: true });
+    stage.addEventListener("touchend", function () {
+      if (sx === null) return;
       sx = null;
+      img.style.transition = "transform .35s cubic-bezier(0.16, 1, 0.3, 1), opacity .35s";
+      if (Math.abs(dx) > 50) {
+        var dir = dx < 0 ? 1 : -1;
+        img.style.transform = "translate3d(" + (dir > 0 ? -60 : 60) + "px,0,0)";
+        show(idx + dir, dir);
+      } else {
+        img.style.transform = "";
+      }
     });
   }
 
@@ -308,6 +427,7 @@
     safe(initLightbox, "initLightbox");
     safe(initCalendly, "initCalendly");
     safe(initContactForm, "initContactForm");
+    safe(initLanguage, "initLanguage"); // last: translates everything the other inits created
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();

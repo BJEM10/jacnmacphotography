@@ -10,6 +10,7 @@ Live site: https://www.jacnmacphotography.com
 - Single-page layout with in-page sections: Services, About, Gallery, Testimonials, Locations and Booking.
 - Responsive images in AVIF + WebP (`srcset`), lazy-loaded below the fold.
 - Booking through an embedded Calendly widget, loaded only when the section comes into view.
+- English / Spanish switch in the header; the visitor's choice is remembered on their device.
 
 ## Structure
 
@@ -17,7 +18,8 @@ Live site: https://www.jacnmacphotography.com
 .
 ├── index.html          # the whole site
 ├── styles.css          # design tokens + all styles
-├── main.js             # header, mobile menu, reveals, counters, carousel, lightbox, Calendly
+├── main.js             # header, mobile menu, reveals, counters, carousel, lightbox, Calendly, EN/ES switch
+├── i18n.js             # Spanish texts for the EN/ES switch
 ├── .htaccess           # HTTPS, caching, compression, 301 redirects from the old URLs
 ├── robots.txt
 ├── sitemap.xml
@@ -48,7 +50,8 @@ After each deploy, bump the `?v=YYYYMMDD` query string on `styles.css` and `main
 | What | Where |
 |---|---|
 | Calendly booking link | `CALENDLY_URL` at the top of `main.js` (single place) |
-| Texts, reviews, services | `index.html` |
+| Texts, reviews, services | `index.html` (and the matching Spanish text in `i18n.js`) |
+| Spanish translation | `i18n.js` — keys are the exact English texts; values are the Spanish version |
 | Colors, fonts, spacing | `:root` tokens at the top of `styles.css` |
 | Old-URL redirects | `.htaccess` |
 
