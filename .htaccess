@@ -1,0 +1,93 @@
+# ============================================================================
+# Jac&Mac Photography — .htaccess (Hostinger / Apache / LiteSpeed)
+# ============================================================================
+
+Options -Indexes
+DirectoryIndex index.html
+AddDefaultCharset UTF-8
+ErrorDocument 404 /index.html
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # ----- Force HTTPS -----
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+  RewriteRule ^(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]
+
+  # ----- Single-page site: old Wix pages -> their section on the landing (301) -----
+  # /quinceañeras — raw (percent-encoded) request line, as browsers send it:
+  RewriteCond %{THE_REQUEST} \s/quincea%C3%B1eras/?[\s?] [NC]
+  RewriteRule ^ /#services [R=301,NE,L]
+  # Decoded form (mod_rewrite matches the decoded path; this file is UTF-8):
+  RewriteRule ^quinceañeras/?$ /#services [R=301,NE,L,NC]
+  RewriteRule ^(wedding-photography|portraits|quinceaneras|events|photo-booth)/?$ /#services [R=301,NE,L,NC]
+  RewriteRule ^about-us/?$ /#about [R=301,NE,L,NC]
+  RewriteRule ^photography-service-locations/?$ /#areas [R=301,NE,L,NC]
+  RewriteRule ^contact/?$ /#booking [R=301,NE,L,NC]
+  # TODO: blog — the Wix blog posts are not migrated; send /blog and /post/* to the home for now.
+  RewriteRule ^(blog|post/.*)/?$ / [R=301,L,NC]
+
+  # ----- Add trailing slash to the page folders (/about-us -> /about-us/) -----
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteCond %{REQUEST_URI} !/$
+  RewriteRule ^(.*)$ /$1/ [R=301,L]
+</IfModule>
+
+# ----- Caching -----
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType text/html "access plus 0 seconds"
+  ExpiresByType text/css "access plus 1 hours"
+  ExpiresByType application/javascript "access plus 1 hours"
+  ExpiresByType text/javascript "access plus 1 hours"
+  ExpiresByType image/avif "access plus 1 year"
+  ExpiresByType image/webp "access plus 1 year"
+  ExpiresByType image/jpeg "access plus 1 year"
+  ExpiresByType image/png "access plus 1 year"
+  ExpiresByType image/x-icon "access plus 1 year"
+  ExpiresByType image/svg+xml "access plus 1 year"
+  ExpiresByType font/woff2 "access plus 1 year"
+</IfModule>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html|htm)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+  # CSS/JS are cache-busted with ?v=YYYYMMDD in the HTML, but revalidate anyway
+  <FilesMatch "\.(css|js|json|xml|txt)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+  <FilesMatch "\.(avif|webp|jpg|jpeg|png|ico|svg|woff2)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+  Header always set Strict-Transport-Security "max-age=31536000" env=HTTPS
+</IfModule>
+
+# ----- MIME types -----
+<IfModule mod_mime.c>
+  AddType image/avif .avif
+  AddType image/webp .webp
+  AddType application/javascript .js
+  AddType text/css .css
+  AddType application/manifest+json .webmanifest
+  AddType font/woff2 .woff2
+</IfModule>
+
+# ----- Compression -----
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/css text/xml text/javascript application/javascript application/json application/xml image/svg+xml
+</IfModule>
+<IfModule mod_brotli.c>
+  AddOutputFilterByType BROTLI_COMPRESS text/html text/plain text/css text/xml text/javascript application/javascript application/json application/xml image/svg+xml
+</IfModule>
+
+# ----- Keep repository files private -----
+<IfModule mod_rewrite.c>
+  RewriteRule ^\.git(/|$) - [F,L]
+  RewriteRule ^(README\.md|\.gitignore)$ - [F,L]
+</IfModule>
